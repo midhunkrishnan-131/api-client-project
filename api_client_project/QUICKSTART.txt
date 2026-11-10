@@ -1,0 +1,161 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                  API CLIENT - QUICK START GUIDE                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+📦 PROJECT CONTENTS
+═══════════════════════════════════════════════════════════════════════════
+
+api_client.py              Main client class (production-ready, 9KB)
+                           └─ APIClient class with retry/pagination logic
+                           └─ Exponential backoff with jitter
+                           └─ Smart 4xx/5xx handling
+                           └─ Pagination generator
+
+test_retry_backoff.py      Test retry logic against httpbin.org (5KB)
+                           └─ Demonstrates 429 rate limit retry
+                           └─ Demonstrates 500 server error retry
+                           └─ Shows 404 failing immediately (no retry)
+                           └─ Shows backoff intervals in logs
+
+test_pagination.py         Test pagination with JSONPlaceholder (4KB)
+                           └─ Demonstrates generator-based pagination
+                           └─ Fetches real data from free API
+                           └─ Shows automatic stop at end of results
+
+README.md                  Complete documentation (8.6KB)
+                           └─ API reference
+                           └─ Usage examples
+                           └─ Configuration guide
+                           └─ Troubleshooting
+
+ANSWERS.md                 Written answers to 3 questions (3.6KB)
+                           └─ Rate limiting handling
+                           └─ Why jitter is necessary
+                           └─ Making POST safe to retry
+
+requirements.txt           Python dependencies (3 packages)
+.env.example               Environment variable template
+
+
+🚀 QUICK START
+═══════════════════════════════════════════════════════════════════════════
+
+1. Install dependencies:
+   $ pip install -r requirements.txt
+
+2. Copy environment template:
+   $ cp .env.example .env
+   $ edit .env  # Add your API key
+
+3. Test retry logic:
+   $ python test_retry_backoff.py
+   
+   Watch for logs showing exponential backoff:
+   - Attempt 1: 0.42s wait
+   - Attempt 2: 2.15s wait
+   - Attempt 3: 5.87s wait
+   - Attempt 4: 14.23s wait
+   - Attempt 5: 31.45s wait
+
+4. Test pagination:
+   $ python test_pagination.py
+   
+   Fetches real data from JSONPlaceholder
+
+5. Use in your code:
+   from api_client import APIClient
+   
+   client = APIClient(
+       base_url='https://api.example.com',
+       api_key_env_var='API_KEY'
+   )
+   
+   # Single request
+   response = client.get('users', params={'page': 1})
+   
+   # Paginate through results
+   for user in client.paginate('users'):
+       print(user['name'])
+
+
+💡 KEY FEATURES
+═══════════════════════════════════════════════════════════════════════════
+
+✓ Smart Retry Logic
+  - Retries ONLY on 429 (rate limit) and 5xx (server errors)
+  - Fails FAST on 4xx client errors (no retry waste)
+  - Max 5 attempts, respects Retry-After header
+
+✓ Exponential Backoff + Jitter
+  - Formula: min(60, 2^N - 1 + random jitter)
+  - Prevents "thundering herd" (all clients retrying at once)
+  - Capped at 60 seconds
+
+✓ Pagination Generator
+  - Memory efficient (yields 1 item at a time)
+  - No hardcoded page count
+  - Stops automatically when API returns empty page
+
+✓ Session Reuse
+  - Default headers set once (Auth + Content-Type)
+  - Connection pooling across all requests
+  - Clean API key handling from .env
+
+✓ Loud Failures
+  - Missing .env keys crash at startup (not silently later)
+  - Structured logging shows retry decisions
+
+
+📊 EXAMPLE LOG OUTPUT (test_retry_backoff.py)
+═══════════════════════════════════════════════════════════════════════════
+
+2026-10-07 15:30:45 - INFO - APIClient initialized
+2026-10-07 15:30:45 - INFO - GET https://httpbin.org/status/200 -> 200
+2026-10-07 15:30:46 - WARNING - 429 from https://httpbin.org/status/429, backoff: 0.42s
+2026-10-07 15:30:47 - WARNING - 429 from https://httpbin.org/status/429, backoff: 2.15s
+2026-10-07 15:30:49 - WARNING - 429 from https://httpbin.org/status/429, backoff: 5.87s
+2026-10-07 15:30:55 - WARNING - 429 from https://httpbin.org/status/429, backoff: 14.23s
+2026-10-07 15:31:09 - WARNING - 429 from https://httpbin.org/status/429, backoff: 31.45s
+2026-10-07 15:31:41 - ERROR - Max retries exceeded
+
+↑ Notice: backoff intervals increase: 0.42 → 2.15 → 5.87 → 14.23 → 31.45
+   This is exponential backoff with jitter preventing simultaneous retries.
+
+
+🎯 DESIGN PHILOSOPHY
+═══════════════════════════════════════════════════════════════════════════
+
+Fail Loud, Not Silent
+  Missing config crashes immediately at init, not silently later
+
+Retry Only What Recovers
+  4xx = permanent (bad data, no auth, not found)
+  5xx = transient (server down, temporarily busy)
+
+Respect Server Signals
+  Honor Retry-After header when provided
+
+Memory Efficient
+  Pagination uses generator, not loading all pages at once
+
+Observable
+  Structured logging at every retry decision
+
+Reusable Session
+  One place for auth headers; connection pooling
+
+
+📞 SUPPORT
+═══════════════════════════════════════════════════════════════════════════
+
+Read README.md for:
+  - Complete API reference
+  - Configuration options
+  - Usage examples
+  - Troubleshooting guide
+
+Read ANSWERS.md for:
+  - Rate limiting deep dive
+  - Jitter explained
+  - POST retry safety
+
