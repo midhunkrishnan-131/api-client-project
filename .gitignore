@@ -1,0 +1,23 @@
+# Sensitive environment files and credentials
+.env
+*.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# Python cache & environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Node / Web dependencies
+node_modules/
+dist/
+build/
+.vscode/
+.idea/
