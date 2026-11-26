@@ -1,9 +1,13 @@
 import os
 import time
 import logging
+import math
 import random
-import requests
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional, Dict, Any, Generator
+
+import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry as UrllibRetry
 from dotenv import load_dotenv
@@ -23,7 +27,7 @@ class APIClient:
     Features:
     - Session reuse with persistent headers
     - Exponential backoff with jitter for 429 and 5xx errors
-    - Respects Retry-After header
+    - Respects Retry-After (delta-seconds or HTTP-date); unusable values fall back to backoff
     - Pagination support
     - .env-based configuration with loud failure on missing keys
     """
@@ -85,6 +89,47 @@ class APIClient:
         backoff = base_backoff + jitter
         # Cap at 60 seconds
         return min(60, backoff)
+
+    def _parse_retry_after(self, header_value: str) -> Optional[float]:
+        """
+        Parse a Retry-After header into a non-negative delay in seconds.
+
+        RFC 9110 allows either delta-seconds or an HTTP-date. Fractional
+        seconds are accepted. Returns None when the value is blank, negative,
+        non-finite, or not a valid HTTP-date so the caller can fall back to
+        exponential backoff instead of aborting a retryable request.
+
+        Args:
+            header_value: Raw Retry-After header value
+
+        Returns:
+            Seconds to wait, or None if the header cannot be used
+        """
+        text = str(header_value).strip()
+        if not text:
+            return None
+
+        try:
+            seconds = float(text)
+        except ValueError:
+            seconds = None
+        else:
+            if math.isfinite(seconds) and seconds >= 0:
+                return seconds
+            return None
+
+        try:
+            retry_at = parsedate_to_datetime(text)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+        if not math.isfinite(delay):
+            return None
+        # A date in the past means the server already allows another try.
+        return max(0.0, delay)
     
     def get(self, endpoint: str, params: Optional[Dict] = None, 
             **kwargs) -> requests.Response:
@@ -97,6 +142,11 @@ class APIClient:
         - 403 Forbidden: Permissions don't change during retry
         - 404 Not Found: Resource won't appear on retry
         Retrying these wastes resources and delays failure feedback.
+
+        A 429 or 5xx response may include Retry-After as delta-seconds or an
+        HTTP-date (RFC 9110). That delay is used as-is, including fractional
+        seconds. If the header is missing, negative, or unparseable, the client
+        waits using exponential backoff instead of failing the request.
         
         Args:
             endpoint: API endpoint (appended to base_url)
@@ -138,19 +188,37 @@ class APIClient:
                         logger.error(f"Max retries exceeded for {url}")
                         response.raise_for_status()
                     
-                    # Check for Retry-After header
-                    if 'Retry-After' in response.headers:
-                        wait_time = int(response.headers['Retry-After'])
+                    # Honor Retry-After (delta-seconds or HTTP-date). An unusable
+                    # value must not abort the retry; fall back to backoff.
+                    retry_after = response.headers.get('Retry-After')
+                    parsed_retry_after = (
+                        self._parse_retry_after(retry_after)
+                        if retry_after is not None else None
+                    )
+                    if parsed_retry_after is not None:
+                        wait_time = parsed_retry_after
+                        shown = (
+                            str(int(wait_time))
+                            if wait_time.is_integer()
+                            else f"{wait_time:.2f}"
+                        )
                         logger.warning(
                             f"{response.status_code} from {url}, "
-                            f"Retry-After header: {wait_time}s"
+                            f"Retry-After header: {shown}s"
                         )
                     else:
                         wait_time = self._calculate_backoff(attempt)
-                        logger.warning(
-                            f"{response.status_code} from {url}, "
-                            f"exponential backoff: {wait_time:.2f}s"
-                        )
+                        if retry_after is not None:
+                            logger.warning(
+                                f"{response.status_code} from {url}, "
+                                f"unusable Retry-After {retry_after!r}, "
+                                f"exponential backoff: {wait_time:.2f}s"
+                            )
+                        else:
+                            logger.warning(
+                                f"{response.status_code} from {url}, "
+                                f"exponential backoff: {wait_time:.2f}s"
+                            )
                     
                     time.sleep(wait_time)
                     continue

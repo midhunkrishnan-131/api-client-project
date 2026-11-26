@@ -4,9 +4,9 @@
 
 **Rate limiting is handled at two levels:**
 
-The client detects the 429 (Too Many Requests) status code and treats it as a retriable error. Before retrying, it checks the `Retry-After` response header—if present, it honors that exact value since the server is explicitly telling us when to return. This respects the API's preferred backoff strategy.
+The client detects the 429 (Too Many Requests) status code and treats it as a retriable error. Before retrying, it checks the `Retry-After` response header. When that header is a non-negative number of seconds or an HTTP-date, the client waits for that delay, since the server is explicitly telling us when to return. This respects the API's preferred backoff strategy.
 
-If no `Retry-After` header exists, the client uses exponential backoff with jitter: wait time grows as 2^attempt - 1, capped at 60 seconds, with random jitter added to prevent thundering herd (all clients retrying simultaneously). After 5 attempts, if still rate-limited, the request fails loudly rather than silent degradation.
+If `Retry-After` is missing, negative, or unparseable, the client uses exponential backoff with jitter: wait time grows as 2^attempt - 1, capped at 60 seconds, with random jitter added to prevent thundering herd (all clients retrying simultaneously). A bad header does not abort the retry. After 5 attempts, if still rate-limited, the request fails loudly rather than silent degradation.
 
 The session is reused across retries, avoiding connection overhead. Logs at each retry show the exact wait time, enabling visibility into rate limit behavior. This design balances aggressive retry with server-friendly backoff.
 
