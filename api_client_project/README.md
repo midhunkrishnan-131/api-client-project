@@ -7,7 +7,7 @@ A reusable, battle-tested HTTP client for REST APIs with automatic retry logic, 
 ✅ **Session Reuse**: Default headers (Auth, Content-Type) set once, reused across all requests  
 ✅ **Smart Retry Logic**: Retries only on 429 and 5xx; fails fast on 4xx client errors  
 ✅ **Exponential Backoff + Jitter**: Prevents thundering herd; capped at 60 seconds  
-✅ **Retry-After Header**: Respects server guidance on when to retry  
+✅ **Retry-After Header**: Honors delta-seconds or an HTTP-date; unusable values fall back to backoff  
 ✅ **Pagination Generator**: Memory-efficient, yields individual items, stops automatically  
 ✅ **Loud Startup Failures**: Missing .env keys crash immediately, not during execution  
 ✅ **Observable**: Structured logging shows retry intervals and decisions  
@@ -178,7 +178,7 @@ wait_time = min(60, (2^N - 1) + random(0, 2^N - 1))
 - Attempt 3: 7-15 seconds
 - Attempt 4: 15-31 seconds (max 60s)
 
-If API sends `Retry-After` header, that takes precedence over calculated backoff.
+If the API sends a usable `Retry-After` header, that wait takes precedence over calculated backoff. The value may be a non-negative number of seconds (fractions allowed) or an HTTP-date. A blank, negative, or unparseable value is ignored and the client falls back to exponential backoff, so a malformed header cannot abort a retryable request.
 
 ## Testing
 
@@ -211,6 +211,14 @@ python test_pagination.py
 ```
 
 Fetches real paginated data from JSONPlaceholder's public API (no auth required).
+
+### Unit tests: Retry-After parsing
+
+```bash
+python -m unittest test_retry_after.py
+```
+
+No network. Checks delta-seconds (including fractions), HTTP-date delays, and invalid `Retry-After` values that must fall back to exponential backoff instead of raising.
 
 ## Real-World Usage Example
 
@@ -274,7 +282,8 @@ api_client_project/
 ├── README.md                  # This file
 ├── ANSWERS.md                 # Written answers to 3 questions
 ├── test_retry_backoff.py      # Test retry logic with httpbin
-└── test_pagination.py         # Test pagination with JSONPlaceholder
+├── test_pagination.py         # Test pagination with JSONPlaceholder
+└── test_retry_after.py        # Unit tests for Retry-After parsing
 ```
 
 ## Dependencies
